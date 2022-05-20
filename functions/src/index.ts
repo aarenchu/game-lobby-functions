@@ -5,8 +5,10 @@ import * as firestore from 'firebase-admin/firestore';
 const app = admin.initializeApp();
 const fs = firestore.getFirestore(app);
 const playerCollectionRef = fs.collection('players');
-// Start writing Firebase Functions
-// https://firebase.google.com/docs/functions/typescript
+
+const getPlayerDocRef = (playerId: string) => {
+  return fs.doc('players/' + playerId);
+};
 
 import * as express from 'express';
 import * as cors from 'cors';
@@ -30,7 +32,12 @@ expressApp.get('/', async (req, res) => {
       // Build the result data
       let result: object[] = [];
       querySnapshot.forEach((documentSnapshot) => {
-        if (documentSnapshot.exists) result.push(documentSnapshot.data());
+        if (documentSnapshot.exists) {
+          let documentData = documentSnapshot.data();
+          let pair = { id: documentSnapshot.id };
+          documentData = { ...documentData, ...pair };
+          result.push(documentData);
+        }
       });
       res.json(result);
     }
@@ -40,8 +47,6 @@ expressApp.get('/', async (req, res) => {
 // addPlayer
 expressApp.post('/', async (req, res) => {
   // Grab the text parameter.
-  console.log('this is the req body');
-  console.log(req.body);
   const username = req.body.username;
   const password = req.body.password;
   let newPlayer = {
@@ -56,10 +61,31 @@ expressApp.post('/', async (req, res) => {
 });
 
 // update player colour
-// expressApp.put('/:id', (req, res) =>
-//   res.send(Widgets.update(req.params.id, req.body))
-// );
+expressApp.put('/:id', async (req, res) => {
+  const playerDocRef = getPlayerDocRef(req.params.id);
+  const newColour = req.body.colour;
+  await playerDocRef
+    .update({ colour: newColour })
+    .then((result) => {
+      res.json('updated item');
+    })
+    .catch((err) => res.json(err));
+});
 
-// expressApp.get('/:id', (req, res) => res.send(Widgets.list()));
+// Get player info by id
+expressApp.get('/:id', async (req, res) => {
+  const playerDocRef = getPlayerDocRef(req.params.id);
+  await playerDocRef
+    .get()
+    .then((documentSnapshot) => {
+      if (documentSnapshot.exists) {
+        let documentData = documentSnapshot.data();
+        let pair = { id: documentSnapshot.id };
+        documentData = { ...documentData, ...pair };
+        res.json(documentData);
+      }
+    })
+    .catch((err) => res.json(err));
+});
 
 exports.players = functions.https.onRequest(expressApp);
