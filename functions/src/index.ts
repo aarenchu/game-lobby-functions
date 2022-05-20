@@ -24,7 +24,7 @@ expressApp.use(cors({ origin: true }));
 
 expressApp.use(bodyParser.json());
 
-// getPlayers
+// getPlayers by ids
 expressApp.get('/', async (req, res) => {
   await playerCollectionRef.get().then((querySnapshot) => {
     if (querySnapshot.empty) res.json('No documents found');
@@ -33,10 +33,13 @@ expressApp.get('/', async (req, res) => {
       let result: object[] = [];
       querySnapshot.forEach((documentSnapshot) => {
         if (documentSnapshot.exists) {
-          let documentData = documentSnapshot.data();
-          let pair = { id: documentSnapshot.id };
-          documentData = { ...documentData, ...pair };
-          result.push(documentData);
+          let data = { id: documentSnapshot.id };
+          let colour = documentSnapshot.get('colour');
+          if (colour) {
+            let pair = { colour: colour };
+            data = { ...data, ...pair };
+          }
+          result.push(data);
         }
       });
       res.json(result);
