@@ -6,8 +6,11 @@ const app = admin.initializeApp();
 const fs = firestore.getFirestore(app);
 const playerCollectionRef = fs.collection('players');
 
-const getPlayerDocRef = (playerId: string) => {
-  return fs.doc('players/' + playerId);
+const getPlayerDocRef = async (playerId: string) => {
+  let query = playerCollectionRef.where('uid', '==', playerId);
+  let querySnapshot = await query.get();
+  let doc = querySnapshot.docs[0];
+  return doc.ref;
 };
 
 import * as express from 'express';
@@ -24,7 +27,7 @@ expressApp.use(cors({ origin: true }));
 
 expressApp.use(bodyParser.json());
 
-// getPlayers by ids
+// getPlayers by uids and colours
 expressApp.get('/', async (req, res) => {
   await playerCollectionRef.get().then((querySnapshot) => {
     if (querySnapshot.empty) res.json('No documents found');
@@ -33,7 +36,7 @@ expressApp.get('/', async (req, res) => {
       let result: object[] = [];
       querySnapshot.forEach((documentSnapshot) => {
         if (documentSnapshot.exists) {
-          let data = { id: documentSnapshot.id };
+          let data = { uid: documentSnapshot.get('uid') };
           let colour = documentSnapshot.get('colour');
           if (colour) {
             let pair = { colour: colour };
@@ -50,41 +53,40 @@ expressApp.get('/', async (req, res) => {
 // addPlayer
 expressApp.post('/', async (req, res) => {
   // Grab the text parameter.
+  const email = req.body.email;
+  const uid = req.body.uid;
   const username = req.body.username;
-  const password = req.body.password;
   let newPlayer = {
-    username: username,
-    password: password,
-    // TODO: Profile pic
+    uid,
+    username,
+    authProvider: 'local',
+    email,
+    colour: '',
   };
   // Push the new message into Firestore using the Firebase Admin SDK.
   const writeResult = await playerCollectionRef.add(newPlayer);
   // Send back a message that we've successfully written the message
-  res.json({ result: `Player with ID: ${writeResult.id} added.` });
+  res.json({ id: writeResult.id });
 });
 
 // update player colour
-expressApp.put('/:id', async (req, res) => {
-  const playerDocRef = getPlayerDocRef(req.params.id);
+expressApp.put('/:uid', async (req, res) => {
   const newColour = req.body.colour;
-  await playerDocRef
+  (await getPlayerDocRef(req.params.uid))
     .update({ colour: newColour })
-    .then((result) => {
+    .then(() => {
       res.json('updated item');
     })
     .catch((err) => res.json(err));
 });
 
-// Get player info by id
-expressApp.get('/:id', async (req, res) => {
-  const playerDocRef = getPlayerDocRef(req.params.id);
-  await playerDocRef
+// Get player info by uid
+expressApp.get('/:uid', async (req, res) => {
+  (await getPlayerDocRef(req.params.uid))
     .get()
     .then((documentSnapshot) => {
       if (documentSnapshot.exists) {
         let documentData = documentSnapshot.data();
-        let pair = { id: documentSnapshot.id };
-        documentData = { ...documentData, ...pair };
         res.json(documentData);
       }
     })
