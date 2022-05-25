@@ -9,8 +9,8 @@ const playerCollectionRef = fs.collection('players');
 const getPlayerDocRef = async (playerId: string) => {
   let query = playerCollectionRef.where('uid', '==', playerId);
   let querySnapshot = await query.get();
-  let doc = querySnapshot.docs[0];
-  return doc.ref;
+  let docPath = querySnapshot.docs[0].ref.path;
+  return fs.doc(docPath);
 };
 
 import * as express from 'express';
@@ -18,6 +18,7 @@ import * as cors from 'cors';
 import * as bodyParser from 'body-parser';
 
 const expressApp = express();
+// const corsHandler = cors({ origin: true });
 
 // Automatically allow cross-origin requests
 expressApp.use(cors({ origin: true }));
@@ -29,25 +30,28 @@ expressApp.use(bodyParser.json());
 
 // getPlayers by uids and colours
 expressApp.get('/', async (req, res) => {
-  await playerCollectionRef.get().then((querySnapshot) => {
-    if (querySnapshot.empty) res.json('No documents found');
-    else {
-      // Build the result data
-      let result: object[] = [];
-      querySnapshot.forEach((documentSnapshot) => {
-        if (documentSnapshot.exists) {
-          let data = { uid: documentSnapshot.get('uid') };
-          let colour = documentSnapshot.get('colour');
-          if (colour) {
-            let pair = { colour: colour };
-            data = { ...data, ...pair };
+  await playerCollectionRef
+    .get()
+    .then((querySnapshot) => {
+      if (querySnapshot.empty) res.json('No documents found');
+      else {
+        // Build the result data
+        let result: object[] = [];
+        querySnapshot.forEach((documentSnapshot) => {
+          if (documentSnapshot.exists) {
+            let data = { uid: documentSnapshot.get('uid') };
+            let colour = documentSnapshot.get('colour');
+            if (colour) {
+              let pair = { colour: colour };
+              data = { ...data, ...pair };
+            }
+            result.push(data);
           }
-          result.push(data);
-        }
-      });
-      res.json(result);
-    }
-  });
+        });
+        res.status(200).json(result);
+      }
+    })
+    .catch((err) => res.json(err));
 });
 
 // addPlayer
@@ -64,9 +68,13 @@ expressApp.post('/', async (req, res) => {
     colour: '',
   };
   // Push the new message into Firestore using the Firebase Admin SDK.
-  const writeResult = await playerCollectionRef.add(newPlayer);
-  // Send back a message that we've successfully written the message
-  res.json({ id: writeResult.id });
+  await playerCollectionRef
+    .add(newPlayer)
+    .then((result) => {
+      // Send back a message that we've successfully written the message
+      res.status(200).json({ id: result.id });
+    })
+    .catch((err) => res.json(err));
 });
 
 // update player colour
@@ -75,7 +83,7 @@ expressApp.put('/:uid', async (req, res) => {
   (await getPlayerDocRef(req.params.uid))
     .update({ colour: newColour })
     .then(() => {
-      res.json('updated item');
+      res.status(200).json('updated item');
     })
     .catch((err) => res.json(err));
 });
@@ -87,7 +95,7 @@ expressApp.get('/:uid', async (req, res) => {
     .then((documentSnapshot) => {
       if (documentSnapshot.exists) {
         let documentData = documentSnapshot.data();
-        res.json(documentData);
+        res.status(200).json(documentData);
       }
     })
     .catch((err) => res.json(err));
