@@ -1,57 +1,46 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
-import * as firestore from 'firebase-admin/firestore';
 
-const app = admin.initializeApp();
-const fs = firestore.getFirestore(app);
-const playerCollectionRef = fs.collection('players');
-
-const getPlayerDocRef = async (playerId: string) => {
-  let query = playerCollectionRef.where('uid', '==', playerId);
-  let querySnapshot = await query.get();
-  let docPath = querySnapshot.docs[0].ref.path;
-  return fs.doc(docPath);
-};
+admin.initializeApp();
 
 import * as express from 'express';
 import * as cors from 'cors';
 import * as bodyParser from 'body-parser';
+import * as pg from 'pg';
 
 const expressApp = express();
-// const corsHandler = cors({ origin: true });
+
+const pool = new pg.Pool({
+  user: 'aarenchu',
+  host: 'localhost',
+  database: 'aarenchu',
+  password: 'secret',
+  port: 5432,
+});
+
+// the pool will emit an error on behalf of any idle clients
+// it contains if a backend error or network partition happens
+pool.on('error', (err, client) => {
+  console.error('Unexpected error on idle client', err);
+  process.exit(-1);
+});
 
 // Automatically allow cross-origin requests
 expressApp.use(cors({ origin: true }));
-
-// Add middleware to authenticate requests
-// expressApp.use(myMiddleware);
 
 expressApp.use(bodyParser.json());
 
 // getPlayers by uids and colours
 expressApp.get('/', async (req, res) => {
-  await playerCollectionRef
-    .get()
-    .then((querySnapshot) => {
-      if (querySnapshot.empty) res.json('No documents found');
-      else {
-        // Build the result data
-        let result: object[] = [];
-        querySnapshot.forEach((documentSnapshot) => {
-          if (documentSnapshot.exists) {
-            let data = { uid: documentSnapshot.get('uid') };
-            let colour = documentSnapshot.get('colour');
-            if (colour) {
-              let pair = { colour: colour };
-              data = { ...data, ...pair };
-            }
-            result.push(data);
-          }
-        });
-        res.status(200).json(result);
-      }
-    })
-    .catch((err) => res.json(err));
+  const client = await pool.connect();
+  try {
+    const result = await client.query('SELECT uid, colour FROM game_lobby');
+    res.status(200).json(result.rows);
+  } catch (err) {
+    res.json(err);
+  } finally {
+    client.release();
+  }
 });
 
 // addPlayer
@@ -60,45 +49,56 @@ expressApp.post('/', async (req, res) => {
   const email = req.body.email;
   const uid = req.body.uid;
   const username = req.body.username;
-  let newPlayer = {
-    uid,
-    username,
-    authProvider: 'local',
-    email,
-    colour: '',
-  };
-  // Push the new message into Firestore using the Firebase Admin SDK.
-  await playerCollectionRef
-    .add(newPlayer)
-    .then((result) => {
-      // Send back a message that we've successfully written the message
-      res.status(200).json({ id: result.id });
-    })
-    .catch((err) => res.json(err));
+  const client = await pool.connect();
+  try {
+    // Send back a message that we've successfully written the message
+    await client.query(
+      'INSERT INTO game_lobby(uid, email, username, auth_provider) VALUES($1, $2, $3, $4)',
+      [uid, email, username, 'local']
+    );
+    res.status(200).json('successful upload');
+  } catch (err) {
+    res.json(err);
+  } finally {
+    client.release();
+  }
 });
 
 // update player colour
 expressApp.put('/:uid', async (req, res) => {
   const newColour = req.body.colour;
-  (await getPlayerDocRef(req.params.uid))
-    .update({ colour: newColour })
-    .then(() => {
-      res.status(200).json('updated item');
-    })
-    .catch((err) => res.json(err));
+  const uid = req.params.uid;
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      'UPDATE game_lobby SET colour = $1 WHERE uid = $2',
+      [newColour, uid]
+    );
+    if (result.rowCount > 0) res.status(200).json('updated item');
+    else res.status(404).json('no item exists by that uid');
+  } catch (err) {
+    res.json(err);
+  } finally {
+    client.release();
+  }
 });
 
 // Get player info by uid
 expressApp.get('/:uid', async (req, res) => {
-  (await getPlayerDocRef(req.params.uid))
-    .get()
-    .then((documentSnapshot) => {
-      if (documentSnapshot.exists) {
-        let documentData = documentSnapshot.data();
-        res.status(200).json(documentData);
-      }
-    })
-    .catch((err) => res.json(err));
+  const uid = req.params.uid;
+  const client = await pool.connect();
+  try {
+    const documentData = await client.query(
+      'SELECT username, colour FROM game_lobby WHERE uid = $1',
+      [uid]
+    );
+    if (documentData.rowCount > 0) res.status(200).json(documentData.rows[0]);
+    else res.status(404).json('not found');
+  } catch (err) {
+    res.json(err);
+  } finally {
+    client.release();
+  }
 });
 
 exports.players = functions.https.onRequest(expressApp);
